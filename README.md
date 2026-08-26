@@ -22,6 +22,8 @@ This is **C\# Windows Forms** application designed to manage multiple [World of 
 * **Decoupled Secret Configuration Management**: Safely isolates sensitive database credentials and validation tokens inside ignored `appsettings.json` and `App.config` files to eliminate source control credential leaks.
 * **Enforced TLS 1.2/1.3 Handshake Layer**: Upgrades legacy HTTP client network protocols to match modern cryptographic traffic transit constraints over the public web.
 
+## ⚙️ How It Works
+
 * **Automated Account Management**: Allows users to select an account from a stored list for instant login or seamless switching between active game windows.  
 ![App Demo](./assets/Animation4.gif)
 *Note: Visual demonstrations were captured in a controlled environment for the purpose of validating system stability and latency under real-world conditions.*
@@ -32,8 +34,6 @@ This is **C\# Windows Forms** application designed to manage multiple [World of 
 ![App Demo](./assets/Animation5.gif)
 * **Multi-Threaded Key Spammer**: Enables users to send custom key combinations to specific game windows at user-defined intervals.  
 ![App Demo](./assets/anim6.gif)
-
-## ⚙️ How It Works
 * **P/Invoke & Win32 API**: Leverages `user32.dll` and `kernel32.dll` to perform low-level window management and simulate keyboard input directly to game clients.  
 * **High-Concurrency Architecture**: Spawns independent threads for each spam task to ensure non-blocking performance across multiple game instances.  
 * **Thread Safety & Synchronization**: Employs **atomic read-modify-write** operations on shared variables to maintain state integrity and prevent race conditions in a multi-threaded environment.  
