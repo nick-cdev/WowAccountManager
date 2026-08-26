@@ -46,7 +46,7 @@ The system leverages a decoupled, asynchronous client-server pipeline to stream 
 To prevent public credential leaks, all live connection parameters and access tokens are completely decoupled from source control. Follow these steps to configure your local keys and securely link your WinForms client to your server app:
 
 ### 1. Set Up the Server App Secrets
-1. Navigate into the **`WowCloudServer`** project folder.
+1. Navigate into the **`WowCloudServer`**(https://github.com/nick-cdev/WowCloudServer) project folder.
 2. Locate the file named `appsettings.Example.json`.
 3. Create a duplicate copy of it in the same directory and name it exactly **`appsettings.json`** (this file is pre-configured in `.gitignore` to never upload to GitHub).
 4. Generate a secure, custom alphanumeric passphrase for your API security token and fill out the properties:
