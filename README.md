@@ -1,7 +1,7 @@
 # Wow Account Manager
 This is a multi-tier C# Windows Forms desktop client and .NET 8 Minimal API cloud platform engineered to automate, monitor, and synchronize multiple World of Warcraft (WoW) account processes concurrently.It automates the login process, maintains active sessions via anti-AFK mechanics, and provides a multi-threaded key-spamming utility.  
 
-The system leverages a decoupled, asynchronous client-server pipeline to stream real-time desktop worker telemetry directly into a hosted Supabase PostgreSQL instance, providing seamless fleet management through an auto-refreshing, web monitoring dashboard
+The system leverages a decoupled, asynchronous client-server pipeline to stream real-time desktop worker telemetry directly into a hosted Supabase PostgreSQL instance, providing seamless fleet management through an auto-refreshing, web monitoring dashboard using [WowCloudServer App](https://github.com/nick-cdev/WowCloudServer)
 
 <p align="center">
   <img src="./assets/img2.gif" alt="App Demo">
