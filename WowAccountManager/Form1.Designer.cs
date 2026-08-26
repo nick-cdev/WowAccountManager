@@ -459,7 +459,6 @@ namespace WowAccountManager
             this.label2.Size = new System.Drawing.Size(42, 13);
             this.label2.TabIndex = 40;
             this.label2.Text = "Locale:";
-            this.label2.Click += new System.EventHandler(this.Label2_Click);
             // 
             // LocaleBox
             // 
@@ -468,7 +467,6 @@ namespace WowAccountManager
             this.LocaleBox.Size = new System.Drawing.Size(143, 20);
             this.LocaleBox.TabIndex = 39;
             this.LocaleBox.Text = "enUS";
-            this.LocaleBox.TextChanged += new System.EventHandler(this.LocaleBox_TextChanged);
             // 
             // label5
             // 

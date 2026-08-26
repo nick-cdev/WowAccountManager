@@ -3,3 +3,8 @@
 [Dd]ebug/
 [Rr]elease/
 .vs/
+
+# Ignore local configuration files containing real secrets
+App.config
+appsettings.json
+appsettings.Development.json

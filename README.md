@@ -8,6 +8,20 @@ This is **C\# Windows Forms** application designed to manage multiple [World of 
 </p>
 
 ## 🚀 Key Features
+## 🌐 Secure Cloud Sync & Telemetry Engine
+
+* **Automated Cloud Synchronization**: Exports and matches local account structures from the XML engine directly into the cloud backend during client startup initialization.
+* **Real-Time Telemetry Streaming**: Background worker loops fire zero-latency status updates to a remote logger without interrupting desktop thread execution.
+* **Parent-Child Entity Relational Tracking**: Logs discrete automation events (e.g., bot logins, anti-AFK procedure activation) directly under a strict foreign key mapping linked to a specific character.
+* **Live "Time-Ago" Web Monitoring Dashboard**: Displays active character profiles inside a dark-mode web console featuring live-updating relative timestamp indicators.
+* **Self-Pruning Maintenance Routine**: Automates backend database hygiene by wiping history logs older than 7 days every time a new client connection initializes.
+
+## 🔒 Enterprise-Grade Security Architecture
+
+* **Centralized Endpoint Filter Grouping**: Implements a dedicated API-wide route routing system that intercepts traffic and applies uniform validation rules across restricted paths.
+* **Decoupled Secret Configuration Management**: Safely isolates sensitive database credentials and validation tokens inside ignored `appsettings.json` and `App.config` files to eliminate source control credential leaks.
+* **Enforced TLS 1.2/1.3 Handshake Layer**: Upgrades legacy HTTP client network protocols to match modern cryptographic traffic transit constraints over the public web.
+
 * **Automated Account Management**: Allows users to select an account from a stored list for instant login or seamless switching between active game windows.  
 ![App Demo](./assets/Animation4.gif)
 *Note: Visual demonstrations were captured in a controlled environment for the purpose of validating system stability and latency under real-world conditions.*

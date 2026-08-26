@@ -10,12 +10,16 @@
 using Magic;
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
 
@@ -24,10 +28,13 @@ namespace WowAccountManager
 
     public partial class Form1 : Form
     {
+
         private const uint pGameState = 0x00B6A9E0;//pointer to a string. "login","charselect","charcreate",
         private const uint pIsLoadingOrConnecting = 0x00B6AA38; //pointer to byte .gamestate. IsLoadingOrConnecting = 0x00B6AA38  14- client ready;10- LOADING WORLD;4-LOADING REALMLIST;3-RETRIEVEING CHARACTER LIST;1-CONECTING;2-SUCCESS ON CONNECTING;
         private const uint pLocale = 0x00B2FE48;//string "enUS" "enGB"
-        private const uint pCurrentAccount = 0x00B6AA40; //string 
+        private const uint pCurrentAccount = 0x00B6AA40; //c string 
+        private const uint pCurrentCharacter = 0x00C79D18; //c string 
+        private const uint pCurrentRealm = 0x00C79B9E; //c string 
         private const uint pWorldLoaded = 0x00BEBA40;
         private const uint pSelectedCharacter = 0xAC436C;//byte 0..9 selected character index
         private const string pname = "Wow";
@@ -45,19 +52,40 @@ namespace WowAccountManager
         private bool busyLaunching = false;
         private int threadCount = 0;
 
+        private static readonly HttpClient client = new HttpClient(new HttpClientHandler()
+        {
+            SslProtocols = System.Security.Authentication.SslProtocols.Tls12 |
+                           System.Security.Authentication.SslProtocols.Tls13,
+            ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+
+        });
+
+        private const string cloudserver_debug = "https://localhost:7189";
+        private const string cloudserver_release = "https://nicksdevio.bsite.net";
+        private const string endpoint_telemetry = "/api/telemetry";
+        private const string endpoint_savecharacters = "/api/savecharacters";
+        private string url_savecharacters, url_telemetry;
+        private bool consume_antiafk_event = false;
+        private bool consume_spamming_event = false;
+
         private struct WowWindow
         {
-            public int count;
+            public int count;//window count 1..n
             public IntPtr handle;
             public int PID;
             public string title;
             public bool isVacant;
             public bool isLoggedIn;
-            public string accountName;
+            public string ClientAccountName;//is read from game client memory
+            public string ClientCharacterName;//is read from game client memory
+            public string ClientRealmName;//is read from game client memory
+            public string login;//from datagrid
+            public string characterName;//from datagrid
+            public string realmName;//from datagrid
             public byte isLoadingOrConnecting;
             public bool isWorldLoaded;
-            public string serverName;
-            public string locale;
+            public string serverName;//from game client memory
+            public string locale;//from game client memory
             public string baseDir;
             public string realmListPath;
             public BlackMagic wow;
@@ -109,12 +137,19 @@ namespace WowAccountManager
         public Form1()
         {
             InitializeComponent();
+            client.DefaultRequestHeaders.ExpectContinue = false;
+
+            // Read values dynamically at runtime
+            // string serverUrl = ConfigurationManager.AppSettings["ServerUrl"];
+            string apiKey = ConfigurationManager.AppSettings["X-API-KEY"];
+            //string serverUrl = ConfigurationManager.AppSettings["ServerUrl"];
+            client.DefaultRequestHeaders.Add("X-API-KEY", apiKey);
         }
         private string GetStringFromGrid(int rowIndex, string columnName)
         {
             var value = dataGridView1.Rows[rowIndex].Cells[columnName].Value;
             string s = value?.ToString() ?? string.Empty;
-            s = s.ToLower();
+            // s = s.ToLower();
             return s;
         }
         private bool GetIntFromGrid(int rowIndex, string columnName, out int buffer)
@@ -147,17 +182,17 @@ namespace WowAccountManager
             {
                 return;
             }
-            WowWindow w1 = default;
-            if (IsGridIndexLoggedIn(ref w1))
+            // WowWindow w1 = default;
+            if (IsGridIndexLoggedIn(out WowWindow w1))
             {
                 NativeMethods.SetForegroundWindow(w1.handle);
                 System.Threading.Thread.Sleep(150);
                 return;
             }
 
-            WowWindow w = default;
             switchPending = true;
-            if (!GetFreeWindowWithRightServer(ref w))
+            int index = GetFreeWindowWithRightServer();
+            if (index == -1)
             {
                 string r = GetGridRealm();
                 if (r == null)
@@ -175,16 +210,16 @@ namespace WowAccountManager
         }
         private bool LoginAndEnterWorld(ref WowWindow w)
         {
-            if (WOW_LogIn(w))
+            if (WOW_LogIn(ref w))
             {
-                if (CharSelect(w, true))
+                if (CharSelect(ref w, true))
                 {
                     return true;
                 }
             }
             return false;
         }
-        private bool CharSelect(WowWindow w, bool enterTheWorld)
+        private bool CharSelect(ref WowWindow w, bool enterTheWorld)
         {
             if (gridSelectedIndex == -1)
             {
@@ -234,6 +269,7 @@ namespace WowAccountManager
 
             if (enterTheWorld)
             {
+                _ = LogActivityToServerAsync(w.characterName, w.realmName, "Character Entered the World");
                 Log("Entering the world...");
                 DoEventsWait(100);
                 PostMessageWrap(w.wow.WindowHandle, NativeMethods.WM_KEYDOWN, NativeMethods.VK_RETURN);
@@ -246,10 +282,8 @@ namespace WowAccountManager
         {
             try
             {
-                // This checks for invalid characters and illegal formats
                 string fullPath = Path.GetFullPath(path);
 
-                // Optional: Ensure it's not just a relative path (e.g., "temp.txt")
                 return Path.IsPathRooted(fullPath);
             }
             catch
@@ -288,11 +322,15 @@ namespace WowAccountManager
 
             if (switchPending)
             {
-                WowWindow w = default;
-                if (GetFreeWindowWithRightServer(ref w))
+                int index = GetFreeWindowWithRightServer();
+                if (index != -1)
                 {
                     switchPending = false;
+                    WowWindow w = WowWindows[index];
+
                     LoginAndEnterWorld(ref w);
+
+                    WowWindows[index] = w;
                 }
             }
         }
@@ -349,14 +387,18 @@ namespace WowAccountManager
                 {
                     w.isVacant = true;
                     w.isLoggedIn = false;
-                    w.accountName = default;
+                    w.ClientAccountName = default;
+                    w.ClientCharacterName = default;
+                    w.ClientRealmName = default;
                 }
                 else
                 {
                     w.isVacant = false;
                     w.isLoggedIn = true;
-                    w.accountName = w.wow.ReadASCIIString(pCurrentAccount, 20);
-                    w.accountName = w.accountName.ToLower();
+                    w.ClientAccountName = w.wow.ReadASCIIString(pCurrentAccount, 32);
+                    w.ClientAccountName = w.ClientAccountName.ToLower();
+                    w.ClientCharacterName = w.wow.ReadASCIIString(pCurrentCharacter, 12);
+                    w.ClientRealmName = w.wow.ReadASCIIString(pCurrentRealm, 32);
                 }
                 w.isLoadingOrConnecting = w.wow.ReadByte(pIsLoadingOrConnecting);
                 if (w.wow.ReadByte(pWorldLoaded) == 1)
@@ -382,7 +424,7 @@ namespace WowAccountManager
                 return false;
             }
         }
-        private void WOW_SendKey(WowWindow w, int key)
+        private void WOW_SendKey(ref WowWindow w, int key)
         {
             NativeMethods.SetForegroundWindow(w.handle);
             System.Threading.Thread.Sleep(150);
@@ -398,7 +440,7 @@ namespace WowAccountManager
         {
             NativeMethods.PostMessage(hWnd, wMsg, (IntPtr)key, (IntPtr)0);
         }
-        private bool WOW_LogIn(WowWindow w)
+        private bool WOW_LogIn(ref WowWindow w)
         {
             if (gridSelectedIndex == -1)
             {
@@ -406,17 +448,23 @@ namespace WowAccountManager
             }
             string login = GetStringFromGrid(gridSelectedIndex, "login");
             string pass = GetStringFromGrid(gridSelectedIndex, "pass");
+
             if (login != default && pass != default)
             {
                 if (!w.isVacant)
                 {
                     return false;
                 }
-                if (IsDisconnectedScreen(w))
+
+                w.login = login;
+                w.characterName = GetStringFromGrid(gridSelectedIndex, "char_name");
+                w.realmName = GetStringFromGrid(gridSelectedIndex, "realm_name");
+
+                if (IsDisconnectedScreen(ref w))
                 {
-                    WOW_SendKey(w, NativeMethods.VK_RETURN);
+                    WOW_SendKey(ref w, NativeMethods.VK_RETURN);
                 }
-                if (IsLoginScreen(w))
+                if (IsLoginScreen(ref w))
                 {
                     NativeMethods.SetForegroundWindow(w.handle);
                     DoEventsWait(150);
@@ -446,7 +494,7 @@ namespace WowAccountManager
 
                     int timeout = 5000;
                     DateTime wait_start = DateTime.Now;
-                    while (!IsRealmScreen(w))
+                    while (!IsRealmScreen(ref w))
                     {
                         if (DateTime.Now.Subtract(wait_start).TotalMilliseconds > timeout)
                         {
@@ -455,9 +503,10 @@ namespace WowAccountManager
                         }
                         DoEventsWait(200);
                     }
-                    if ((IsRealmScreen(w)))
+                    if ((IsRealmScreen(ref w)))
                     {
                         Log("Successfully logged in");
+                        _ = LogActivityToServerAsync(w.characterName, w.realmName, "Character Logged In");
                         return true;
                     }
 
@@ -465,9 +514,9 @@ namespace WowAccountManager
             }
             return false;
         }
-        private bool IsGridIndexLoggedIn(ref WowWindow w)
+        private bool IsGridIndexLoggedIn(out WowWindow w)
         {
-            w = default;
+            w = default(WowWindow);
             if (gridSelectedIndex == -1)
             {
                 return false;
@@ -480,7 +529,7 @@ namespace WowAccountManager
 
             foreach (WowWindow ww in WowWindows)
             {
-                if (login == ww.accountName)
+                if (login == ww.ClientAccountName)
                 {
                     w = ww;
                     return true;
@@ -567,13 +616,13 @@ namespace WowAccountManager
             foreach (WowWindow w in WowWindows)
             {
                 string s;
-                if (w.accountName == default)
+                if (w.ClientAccountName == default)
                 {
                     s = "{not logged in}";
                 }
                 else
                 {
-                    s = w.accountName;
+                    s = w.ClientAccountName;
                 }
                 AppendColorText($"account: {s} ", Color.Red);
                 AppendColorText($"window: {w.title} ", Color.Green);
@@ -605,26 +654,26 @@ namespace WowAccountManager
 
             return default;
         }
-        private bool GetFreeWindowWithRightServer(ref WowWindow w)
+        private int GetFreeWindowWithRightServer()
         {
             string r = GetGridRealm();
             if (r == null)
             {
-                return false;
+                return -1;
             }
-            foreach (WowWindow ww in WowWindows)
+
+            for (int i = 0; i < WowWindows.Count; i++)
             {
-                if (ww.isVacant)
+                WowWindow ww = WowWindows[i];
+                if (ww.isVacant && ww.serverName == r)
                 {
-                    if (ww.serverName == r)
-                    {
-                        w = ww;
-                        return true;
-                    }
+                    return i;
                 }
             }
-            return false;
+            return -1;
         }
+
+
         private string FindServerName(ref WowWindow w)
         {
             string newRealm = default;
@@ -769,11 +818,11 @@ namespace WowAccountManager
             }
             return true;
         }
-        private bool IsLoginScreen(WowWindow w)
+        private bool IsLoginScreen(ref WowWindow w)
         {
             return IsPointDataMatching(w.handle, pdLoginScreen);
         }
-        private bool IsDisconnectedScreen(WowWindow w)
+        private bool IsDisconnectedScreen(ref WowWindow w)
         {
             return IsPointDataMatching(w.handle, pdDisconnected);
         }
@@ -831,7 +880,7 @@ namespace WowAccountManager
 
             return false;
         }
-        private bool IsRealmScreen(WowWindow w)
+        private bool IsRealmScreen(ref WowWindow w)
         {
             return IsPointDataMatching(w.handle, pdRealmScreen);
         }
@@ -845,6 +894,7 @@ namespace WowAccountManager
         }
         private void SendAFKKey(WowWindow w, byte keyCode, int delay, int pushtime)
         {
+
             ThreadPool.QueueUserWorkItem(delegate
             {
                 Interlocked.Increment(ref threadCount);
@@ -864,13 +914,8 @@ namespace WowAccountManager
         }
         private void SendSpamKeys(WowWindow w)
         {
-            /*
-            if (sendingIt == 1)
-            {
 
-                return;
-            }*/
-            Debug.WriteLine($" 22 {w.accountName} , {w.count} ");
+            //Debug.WriteLine($" 22 {w.ClientAccountName} , {w.count} ");
             char[] allChars = textBox1.Text.ToCharArray();
             List<short> keys = new List<short>();
             foreach (char c in allChars)
@@ -965,9 +1010,9 @@ namespace WowAccountManager
                 uint start = (uint)mbi.BaseAddress;
                 uint end = start + (uint)mbi.RegionSize;
 
-                Console.WriteLine($"Region Start: 0x{start:X}");
-                Console.WriteLine($"Region End:   0x{end:X}");
-                Console.WriteLine($"Region Size:  {mbi.RegionSize} bytes");
+                Debug.WriteLine($"Region Start: 0x{start:X}");
+                Debug.WriteLine($"Region End:   0x{end:X}");
+                Debug.WriteLine($"Region Size:  {mbi.RegionSize} bytes");
 
             }
         }
@@ -995,7 +1040,7 @@ namespace WowAccountManager
                         if (found1 != currentAddr)
                         {
                             return found1;
-                            // Console.WriteLine($"Region {cc}: currentAddr: {currentAddr:X}, found1:0x{found1:X}");
+                            // Debug.WriteLine($"Region {cc}: currentAddr: {currentAddr:X}, found1:0x{found1:X}");
                         }
                     }
                 //move to next region
@@ -1150,6 +1195,7 @@ namespace WowAccountManager
                     spamtimer.Interval = 1000;
                 }
                 spamtimer.Enabled = true;
+                consume_spamming_event = true;
             }
             else
             {
@@ -1167,6 +1213,7 @@ namespace WowAccountManager
                 lb.Text = "ANTIAFK IS ON";
                 lb.ForeColor = Color.Red;
                 antiafktimer.Enabled = true;
+                consume_antiafk_event = true;
             }
             else
             {
@@ -1212,13 +1259,24 @@ namespace WowAccountManager
 
         private void Form1_Load(object sender, EventArgs e)
         {
+
+
 #if !DEBUG
+            //RELEASE
             this.Controls.Remove(DebugButton1);
             this.Controls.Remove(DebugButton2);
 
             DebugButton1.Dispose();
             DebugButton2.Dispose();
+
+            var baseserver = new Uri(cloudserver_release);
+#else
+            //DEBUG
+            var baseserver = new Uri(cloudserver_debug);
 #endif
+            url_savecharacters = new Uri(baseserver, endpoint_savecharacters).ToString();
+            url_telemetry = new Uri(baseserver, endpoint_telemetry).ToString();
+
             rootDir = GetRootDir();
             settingsPath = Path.Combine(rootDir, @"settings.xml");
             grid1Path = Path.Combine(rootDir, @"grid1.xml");
@@ -1231,6 +1289,7 @@ namespace WowAccountManager
 
             CheckBox2_CheckedChanged(checkBox2, EventArgs.Empty);
             CheckBox1_CheckedChanged(checkBox1, EventArgs.Empty);
+            _ = SaveCharactersToServerAsync();
         }
         private void AntiAFKTimer_Tick(object sender, EventArgs e)
         {
@@ -1239,6 +1298,11 @@ namespace WowAccountManager
                 {
                     if (w.isLoggedIn)
                     {
+                        if (consume_antiafk_event)
+                        {
+                            _ = LogActivityToServerAsync(w.ClientCharacterName, w.ClientRealmName, "Started AntiAFK Routine");
+                            consume_antiafk_event = false;
+                        }
                         AntiAFK_tick(w);
                     }
                 }
@@ -1265,6 +1329,11 @@ namespace WowAccountManager
                 {
                     if (w.isLoggedIn)
                     {
+                        if (consume_spamming_event)
+                        {
+                            _ = LogActivityToServerAsync(w.ClientCharacterName, w.ClientRealmName, "Started Spamming Routine");
+                            consume_spamming_event = false;
+                        }
                         SendSpamKeys(w);
                     }
                 }
@@ -1305,14 +1374,71 @@ namespace WowAccountManager
             }
         }
 
-        private void Label2_Click(object sender, EventArgs e)
-        {
 
+        public async Task LogActivityToServerAsync(string character, string realm, string activityDescription)
+        {
+            var payload = new
+            {
+                CharName = character,
+                RealmName = realm,
+                ActivityName = activityDescription
+            };
+
+            try
+            {
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                string jsonPayload = serializer.Serialize(payload);
+
+                var jsonContent = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+
+                HttpResponseMessage response = await client.PostAsync(url_telemetry, jsonContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                }
+                else
+                {
+
+                }
+                Debug.WriteLine($"{response.StatusCode} Sending: {character}, {realm}, {activityDescription}, {DateTime.UtcNow}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to stream telemetry loop: {ex.Message}");
+            }
         }
-
-        private void LocaleBox_TextChanged(object sender, EventArgs e)
+        public async Task SaveCharactersToServerAsync()
         {
+            if (!File.Exists(grid1Path))
+            {
+                Debug.WriteLine("SaveCharactersToServerAsync: grid1path does not exist");
+                return;
+            }
 
+            try
+            {
+                string xmlContent = File.ReadAllText(grid1Path);
+                var content = new StringContent(xmlContent, Encoding.UTF8, "application/xml");
+
+                HttpResponseMessage response = await client.PostAsync(url_savecharacters, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Debug.WriteLine("SaveCharactersToServerAsync: OK");
+                }
+                else
+                {
+                    string serverMessage = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"SaveCharactersToServerAsync: FAIL. Status: {response.StatusCode}\nDetails: {serverMessage}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Network or File transmission failure: {ex.Message}");
+            }
+            finally
+            {
+            }
         }
 
         private void SaveControlStates()
@@ -1337,7 +1463,7 @@ namespace WowAccountManager
                 Control[] foundControls = this.Controls.Find(controlName, true);
                 if (foundControls.Length > 1)
                 {
-                    System.Diagnostics.Debug.Fail("Duplicate control name found: " + controlName);
+                    Debug.Fail("Duplicate control name found: " + controlName);
                 }
 
                 if (foundControls.Length > 0)
