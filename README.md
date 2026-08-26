@@ -39,10 +39,50 @@ The system leverages a decoupled, asynchronous client-server pipeline to stream 
 * **Thread Safety & Synchronization**: Employs **atomic read-modify-write** operations on shared variables to maintain state integrity and prevent race conditions in a multi-threaded environment.  
 * **Data Persistence**: Uses a `DataSet` backed by an **XML file system** for lightweight, portable storage of account credentials and configuration data. 
 
-## 🏁 Getting Started
-1. **Clone the Repository**: Use the GitHub Desktop client or run `git clone https://github.com/nick-cdev/WowAccountManager`.  
-2. **Prerequisites**: Ensure you have the .NET Framework installed.  
-3. **Build**: Open the `.sln` file in Visual Studio and build the solution to generate the executable. 
+---
+
+## 🏁 Getting Started & Security Linking
+
+To prevent public credential leaks, all live connection parameters and access tokens are completely decoupled from source control. Follow these steps to configure your local keys and securely link your WinForms client to your server app:
+
+### 1. Set Up the Server App Secrets
+1. Navigate into the **`WowCloudServer`** project folder.
+2. Locate the file named `appsettings.Example.json`.
+3. Create a duplicate copy of it in the same directory and name it exactly **`appsettings.json`** (this file is pre-configured in `.gitignore` to never upload to GitHub).
+4. Generate a secure, custom alphanumeric passphrase for your API security token and fill out the properties:
+   ```json
+   {
+     "ConnectionStrings": {
+       "SupabaseDb": "Host=your-supabase-host-address;Database=postgres;Username=postgres;Password=your-password;"
+     },
+     "Security": {
+       "ApiKey": "YOUR_CHOSEN_SECURE_TOKEN_STRING"
+     }
+   }
+   ```
+
+### 2. Set Up the WinForms Client Key Link
+1. Navigate into the **`WowAccountManager`** desktop project folder.
+2. Locate the file named `App.Example.config`.
+3. Create a duplicate copy of it in the same directory and name it exactly **`App.config`** (this is your local, untracked operational profile).
+4. Update the configuration keys to target your server's hosting port and insert the **exact same** API security token string you defined in your server's JSON file:
+   ```xml
+   <?xml version="1.0" encoding="utf-8" ?>
+   <configuration>
+     <appSettings>
+       <add key="X-API-KEY" value="YOUR_CHOSEN_SECURE_TOKEN_STRING" />
+     </appSettings>
+   </configuration>
+   ```
+
+### 3. Compile and Launch
+1. Open `WowAccountManager.sln` inside Visual Studio.
+2. Verify that your server's `wwwroot/index.html` file properties are set to **Build Action: Content** and **Copy to Output Directory: Copy if newer** to ensure the live dashboard copies into Release packages.
+3. Build and launch your server app.
+4. Launch your WinForms application. When the client executes its initialization step, it will read your `App.config`, pass your secret key through the custom HTTP headers layer, pass the validation filter, and activate your real-time synchronization loop.
+5. Open a browser tab to `https://localhost:7189/` to view your dark-mode live dashboard panel.
+
+---
 
 > ## ⚠️ Legal Disclaimer
 > 
